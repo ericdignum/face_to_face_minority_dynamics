@@ -6,11 +6,14 @@ from numpy.linalg import norm
 
 
 class HomophilyModel:
-    def __init__(self, n=200, d=1.0, v=1.0, L=100, balance=0.5, h_ii=0.8):
+    def __init__(self, n=200, d=1.0, v=1.0, L=100, balance=0.5, h_ii=0.8,
+        shuffle_agents='not-shuffled', pairwise='All-highest-h_ii'):
         self.n = n  # number of agents
         self.d = d  # interaction distance threshold
         self.v = v  # step length
         self.L = L  # side size of the square box
+        self.pairwise = pairwise
+        self.shuffle_agents = shuffle_agents
 
         # uniformly distributed attractiveness
         self.a = np.random.rand(self.n)
@@ -31,6 +34,7 @@ class HomophilyModel:
 
         # edges
         self.edges = {}
+        self.nx_edges = {}
 
         self.iterations = 0
 
@@ -70,7 +74,12 @@ class HomophilyModel:
 
     def iteration(self):
         self.update_neighborhood()
-        for i in range(self.n):
+
+        shuffled = list(range(self.n))
+        if self.shuffle_agents.lower()=='shuffled':
+            np.random.shuffle(shuffled)
+
+        for i in shuffled:
             if self.active[i]:
                 max_aj = 0 if len(self.current_neighborhood[i]) == 0 else max(
                     self.a[self.current_neighborhood[i]]  # the attractiveness of each j
@@ -91,7 +100,10 @@ class HomophilyModel:
                     p_i = max_h_j
                     to_interact = p_i > random.random()
                     if to_interact:
-                        self.interact_with_highest_h_j_neighbors(i)
+                        if self.pairwise.lower()=='pairwise':
+                            self.interact_only_with_highest_h_j_neighbor(i)
+                        else:
+                            self.interact_with_highest_h_j_neighbors(i)
                 # active isolated individuals become inactive with probability r_i
                 if len(self.current_neighborhood[i]) == 0:
                     # (note that the neighborhood is not the updated one, but it should be ok)
@@ -139,8 +151,9 @@ class HomophilyModel:
         self.positions[i] %= self.L
 
     def update_neighborhood(self):
-        # we only calculate distance between active nodes because only active nodes can be part of neighborhoods
-        # but for this we need to play a bit with the indices!
+        # we only calculate distance between active nodes because only active 
+        # nodes can be part of neighborhoods but for this we need to play a bit 
+        # with the indices!
         distance_df = pd.DataFrame(self.distance_in_a_periodic_box(self.positions[self.active], self.L))
         within_d = (distance_df <= self.d).values
         indices = distance_df.index.values
@@ -185,3 +198,17 @@ class HomophilyModel:
             self.edges[edge] = 1
         else:
             self.edges[edge] += 1
+
+        if i not in self.nx_edges:
+            self.nx_edges[i] = [j]
+        else: self.nx_edges[i].append(j)
+
+if __name__=='__main__':
+    import cProfile, pstats
+    profiler = cProfile.Profile()
+    profiler.enable()
+    model = HomophilyModel()
+    model.run(1000)
+    profiler.disable()
+    stats = pstats.Stats(profiler).sort_stats('tottime')
+    stats.print_stats(0.25)
